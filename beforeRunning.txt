@@ -1,0 +1,3 @@
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+..\env0_3.11.1\Scripts\activate
+Ctrl+Shift+P > python interpreter > path (C:\Users\Krzysztof\PyProjects\env0_3.11.1\Scripts\python.exe)
