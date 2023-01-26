@@ -51,21 +51,24 @@ def texts_from_elements(elements:list) -> list:
 def get_elements_with_symbols(driver:webdriver) -> list:
     return driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")
 
-if __name__ == "__main__":
-    start = time.time()
+class Browser(Thread):
+    def __init__(self, word:str) -> None:
+        super().__init__()
 
-    service = EdgeService(EdgeChromiumDriverManager().install())
-    driver = webdriver.Edge(service=service)
-    url="https://www.tradingview-widget.com/widgetembed/?interval=12M&symboledit=1&saveimage=0&withdateranges=0&theme=dark&symbol="
-    driver.get(url)
-    driver.implicitly_wait(10)
+        self.word = word
+        self.symbols = []
 
-    open_symbol_search(driver)
+    def run(self):
+        service = EdgeService(EdgeChromiumDriverManager().install())
+        driver = webdriver.Edge(service=service)
+        url="https://www.tradingview-widget.com/widgetembed/?interval=12M&symboledit=1&saveimage=0&withdateranges=0&theme=dark&symbol="
+        driver.get(url)
+        driver.implicitly_wait(10)
 
-    symbols = []
-    for word in ["AC", "NQ"]:
+        open_symbol_search(driver)
+
         clear_input(driver)
-        fill_input(driver, word)
+        fill_input(driver, self.word)
         
         rows = []
         while len(rows) < 500:
@@ -75,9 +78,25 @@ if __name__ == "__main__":
 
         expand_all_handles(driver)
         elements = get_elements_with_symbols(driver)
-        symbols.extend(texts_from_elements(elements))
+        self.symbols = texts_from_elements(elements)
 
-    driver.quit()
+        driver.quit()
+
+if __name__ == "__main__":
+    start = time.time()
+
+    words = ["AC", "NQ"]
+    threads = []
+
+    for word in words:
+        t = Browser(word)
+        t.start()
+        threads.append(t)
+    
+    symbols = []
+    for t in threads:
+        t.join()
+        symbols.extend(t.symbols)
 
     end = time.time()
 
