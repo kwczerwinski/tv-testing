@@ -51,6 +51,16 @@ def texts_from_elements(elements:list) -> list:
 def get_elements_with_symbols(driver:webdriver) -> list:
     return driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")
 
+class TextFromElements(Thread):
+    def __init__(self, elements:list) -> None:
+        super().__init__()
+
+        self.elements = elements
+        self.texts = []
+
+    def run(self):
+        self.texts = [el.text for el in self.elements]
+
 class Browser(Thread):
     def __init__(self, word:str) -> None:
         super().__init__()
@@ -78,7 +88,17 @@ class Browser(Thread):
 
         expand_all_handles(driver)
         elements = get_elements_with_symbols(driver)
-        self.symbols = texts_from_elements(elements)
+        
+        threads = []
+        divisions = 10
+        for n in range(divisions):
+            t = TextFromElements(elements[n::divisions])
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+            self.symbols.extend(t.texts)
 
         driver.quit()
 
@@ -90,8 +110,8 @@ if __name__ == "__main__":
 
     for word in words:
         t = Browser(word)
-        t.start()
         threads.append(t)
+        t.start()
     
     symbols = []
     for t in threads:
