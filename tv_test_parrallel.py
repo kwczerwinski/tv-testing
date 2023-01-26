@@ -1,6 +1,7 @@
 import os
 import string
 import time
+from threading import Thread
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -44,28 +45,40 @@ def expand_all_handles(driver:webdriver) -> None:
                 handle.click()
                 break
 
+def texts_from_elements(elements:list) -> list:
+    return [el.text for el in elements]
+
+def get_elements_with_symbols(driver:webdriver) -> list:
+    return driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")
+
 if __name__ == "__main__":
+    start = time.time()
+
     service = EdgeService(EdgeChromiumDriverManager().install())
     driver = webdriver.Edge(service=service)
     url="https://www.tradingview-widget.com/widgetembed/?interval=12M&symboledit=1&saveimage=0&withdateranges=0&theme=dark&symbol="
     driver.get(url)
-    driver.implicitly_wait(1)
+    driver.implicitly_wait(10)
 
     open_symbol_search(driver)
-    clear_input(driver)
-    fill_input(driver, "NQ")
-    
-    rows = []
-    while len(rows) < 1000:
+
+    symbols = []
+    for word in ["AC", "NQ"]:
+        clear_input(driver)
+        fill_input(driver, word)
+        
+        rows = []
+        while len(rows) < 500:
+            expand_all_handles(driver)
+            rows = find_all_by_class(driver, "itemInfoCell-DPHbT8fH")
+            move_to(driver, rows[-1])
+
         expand_all_handles(driver)
-        rows = find_all_by_class(driver, "itemInfoCell-DPHbT8fH")
-        move_to(driver, rows[-1])
+        elements = get_elements_with_symbols(driver)
+        symbols.extend(texts_from_elements(elements))
 
-    expand_all_handles(driver)
-    start = time.time()
-    symbols = [el.text for el in driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")]
-    end = time.time()
-    print(f"{len(symbols)} : {end - start}")
-
-    time.sleep(5)
     driver.quit()
+
+    end = time.time()
+
+    print(f"{len(symbols)} : {end - start}")
