@@ -1,9 +1,9 @@
 import json
 import os
+from queue import Empty
 import string
 import time
-from queue import Empty, Queue
-from threading import Thread
+from multiprocessing import Array, JoinableQueue, Process, Queue
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -59,7 +59,7 @@ def texts_from_elements(elements:list) -> list:
 def get_elements_with_symbols(driver:webdriver) -> list:
     return driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")
 
-class TextFromElements(Thread):
+class TextFromElements(Process):
     def __init__(self, elements:list) -> None:
         super().__init__()
 
@@ -125,13 +125,14 @@ def get_source_code(driver:webdriver) -> string:
 def wait_till_attached_to_dom(driver:webdriver, element:webdriver) -> None:
     WebDriverWait(driver, timeout=10).until_not(expected_conditions.staleness_of(element))
 
-class Browser(Thread):
-    def __init__(self, queue:Queue, rect:dict) -> None:
+class Browser(Process):
+    def __init__(self, queue:JoinableQueue, rect:dict) -> None:
         super().__init__()
 
         self.daemon = True
         self.rect = rect
         self.symbols = []
+        self.queue = queue
 
     def run(self):
         # driver = open_browser()
@@ -141,23 +142,24 @@ class Browser(Thread):
 
         while True:
             try:
-                source_description = queue.get()
+                # source_description = self.arr
+                source_description = self.queue.get(block=True, timeout=1)
             except Empty:
                 break
 
             goto_sources(driver)
-            sources = get_sources(driver)[last_checked_element:]
+            sources = get_sources(driver)
 
-            for i,el in enumerate(sources):
-                if el.text == source_description:
-                    el.click()
+            for i in range(last_checked_element,len(sources)):
+                if sources[i].text == source_description:
+                    sources[i].click()
                     last_checked_element = i
                     break
 
             source_code = get_source_code(driver)
 
             list_to_json_file(f"tmp/{source_code}#{source_description.split(' — ')[-1]}.json",[])
-            queue.task_done()
+            self.queue.task_done()
         # # x = driver.page_source
         # # driver.save_screenshot(f"screenshots/after_open_menu.png")
         # goto_sources(driver)
@@ -208,7 +210,8 @@ if __name__ == "__main__":
     goto_sources(driver)
     sources_descriptions = [el.text for el in get_sources(driver)]
     driver.quit()
-    queue = Queue()
+    queue = JoinableQueue()
+    # queue = Queue()
     for sd in sources_descriptions:
         queue.put(sd)
 
@@ -227,7 +230,7 @@ if __name__ == "__main__":
         t = Browser(queue=queue, rect=rect)
         threads.append(t)
         t.start()
-    
+
     queue.join()
 
     symbols = []
