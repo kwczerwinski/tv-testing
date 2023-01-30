@@ -3,7 +3,7 @@ import os
 from queue import Empty
 import string
 import time
-from multiprocessing import Array, JoinableQueue, Process, Queue
+from multiprocessing import Array, JoinableQueue, Process, Queue, freeze_support, set_start_method
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -129,7 +129,7 @@ class Browser(Process):
     def __init__(self, queue:JoinableQueue, rect:dict) -> None:
         super().__init__()
 
-        self.daemon = True
+        # self.daemon = True
         self.rect = rect
         self.symbols = []
         self.queue = queue
@@ -158,7 +158,7 @@ class Browser(Process):
 
             source_code = get_source_code(driver)
 
-            list_to_json_file(f"tmp/{source_code}#{source_description.split(' — ')[-1]}.json",[])
+            list_to_json_file(f"symbols/{source_code}#{source_description.split(' — ')[-1]}.json",[])
             self.queue.task_done()
         # # x = driver.page_source
         # # driver.save_screenshot(f"screenshots/after_open_menu.png")
@@ -195,6 +195,8 @@ def goto_sources(driver:webdriver) -> None:
     find_by_class(driver, "exchange-KMA9DMBY").click()
 
 if __name__ == "__main__":
+    freeze_support()
+    # set_start_method('spawn')
     start = time.time()
     driver = open_browser()
     driver.maximize_window()
