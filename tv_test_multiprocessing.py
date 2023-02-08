@@ -1,9 +1,10 @@
+from concurrent.futures import ProcessPoolExecutor
 import json
 import os
 from queue import Empty
 import string
 import time
-from multiprocessing import Array, JoinableQueue, Process, Queue, freeze_support, set_start_method
+from multiprocessing import Array, JoinableQueue, Process, Queue, cpu_count, freeze_support, set_start_method
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -27,7 +28,7 @@ def find_input(driver:webdriver) -> webdriver:
     return find_by_class(driver, "search-eYX5YvkT")
 
 def clear_input(driver:webdriver) -> None:
-    send_to_input(driver, Keys.CONTROL + "a" + Keys.DELETE)
+    send_to_input(driver, Keys.CONTROL + "a" + Keys.DELETE, True)
 
 def find_all_by_class(driver:webdriver, class_selector:string) -> list:
     return driver.find_elements(by=By.CLASS_NAME, value=class_selector)
@@ -36,10 +37,31 @@ def move_to(driver:webdriver, destination:webdriver) -> None:
     wait_till_attached_to_dom(driver, destination)
     ActionChains(driver).move_to_element(destination).perform()
 
-def send_to_input(driver:webdriver, keys:object) -> None:
+def is_disabled(driver):
+    return find_all_by_class(driver, "isDisabled-uO7HM85b")
+
+def wait_till_not_disabled(driver):
+    while True:
+        if not is_disabled(driver):
+            break
+
+def wait_till_disabled(driver):
+    while True:
+        if is_disabled(driver):
+            break
+
+def send_to_input(driver:webdriver, keys:object, will_disable:bool) -> None:
     find_input(driver).send_keys(keys)
     wait_for_load_end(driver)
-    time.sleep(0.5)
+    # save_name = f"{os.getpid()}_{time.time()}"
+    # driver.save_screenshot(f"debug\\{save_name}.png")
+    # with open(f"debug\\{save_name}.html", "w", encoding="utf-8") as file:
+    #     file.write(driver.page_source)
+    # if will_disable:
+    #     wait_till_disabled(driver)
+    # else:
+    #     wait_till_not_disabled(driver)
+    # time.sleep(0.5)
 
 def expand_all_handles(driver:webdriver) -> None:
     while True:
@@ -56,8 +78,11 @@ def expand_all_handles(driver:webdriver) -> None:
 def texts_from_elements(elements:list) -> list:
     return [el.text for el in elements]
 
-def get_elements_with_symbols(driver:webdriver) -> list:
-    return driver.find_elements(by=By.XPATH, value="//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class) and descendant::em]")
+def get_elements_with_symbols(driver:webdriver, em_tag_filter:bool) -> list:
+    return driver.find_elements(by=By.XPATH, value=f"//div[contains(@class, 'actionHandleWrap-DPHbT8fH') and not(descendant::*)]/following-sibling::div/div/span[not(@class){' and descendant::em' if em_tag_filter else ''}]")
+
+def go_back_from_sources(driver:webdriver) -> None:
+    find_by_class(driver, "button-Ns7rA9vx").click()
 
 class TextFromElements(Process):
     def __init__(self, elements:list) -> None:
@@ -69,11 +94,13 @@ class TextFromElements(Process):
     def run(self):
         self.texts = [el.text for el in self.elements]
 
-def load_rows(driver:webdriver, word:string) -> None:
+def is_spinner_not_visible(driver):
+    return not find_all_by_class(driver, "spinnerContainer-vWG52QBW")
+
+def load_rows(driver:webdriver, word:string, max_expand:int = 1000) -> None:
     rows_count_old = 0
-    while True:
-        is_spinner_not_visible = not find_all_by_class(driver, "spinnerContainer-vWG52QBW")
-        if is_spinner_not_visible:
+    while rows_count_old < max_expand:
+        if is_spinner_not_visible(driver):
             break
 
         rows = find_all_by_class(driver, "itemInfoCell-DPHbT8fH")
@@ -110,33 +137,64 @@ def open_browser(rect=None) -> webdriver:
 
     return driver
 
+def no_results(driver:webdriver) -> list:
+    return find_all_by_class(driver, "container-CePxGLxr")
+
 def get_source_code(driver:webdriver) -> string:
     clear_input(driver)
-    if find_all_by_class(driver, "noResultsDesktop-SVZTqWhV"):
-        send_to_input(driver, "A")
+    if no_results(driver):
+        send_to_input(driver, "A", False)
         clear_input(driver)
-        send_to_input(driver, Keys.DOWN)
-        if find_all_by_class(driver, "noResultsDesktop-SVZTqWhV"):
+        send_to_input(driver, Keys.DOWN, False)
+        if no_results(driver):
             return "!"
-    send_to_input(driver, Keys.DOWN)
+    send_to_input(driver, Keys.DOWN, False)
     code = find_input(driver).get_property("value").split(":")[0].replace("'", "")
     return code
 
 def wait_till_attached_to_dom(driver:webdriver, element:webdriver) -> None:
     WebDriverWait(driver, timeout=10).until_not(expected_conditions.staleness_of(element))
 
+def get_symbols_recursive(driver:webdriver, word:string = "", previous_first:string = "") -> list:
+    clear_input(driver)
+    send_to_input(driver, word, False)
+
+    first_row = ""
+    while first_row == previous_first:
+        first_row = find_by_class(driver, "listContainer-vWG52QBW").text
+
+    # goto_sources(driver)
+    # go_back_from_sources(driver)
+    elements = []
+    
+    if no_results(driver):
+        pass
+    elif is_spinner_not_visible(driver):
+        expand_all_handles(driver)
+        elements.extend(texts_from_elements(get_elements_with_symbols(driver, word != "")))
+    else:
+        for letter in string.ascii_uppercase:
+            word += letter
+            # send_to_input(driver, letter, False)
+            elements.extend(get_symbols_recursive(driver, word, first_row))
+            # send_to_input(driver, Keys.BACKSPACE, False)
+            word = word[:-1]
+
+    return elements
+
 class Browser(Process):
-    def __init__(self, queue:JoinableQueue, rect:dict) -> None:
+    # def __init__(self, queue:JoinableQueue, rect:dict) -> None:
+    def __init__(self, queue:JoinableQueue) -> None:
         super().__init__()
 
-        # self.daemon = True
-        self.rect = rect
+        self.daemon = True
+        # self.rect = rect
         self.symbols = []
         self.queue = queue
 
     def run(self):
-        # driver = open_browser()
-        driver = open_browser(self.rect)
+        driver = open_browser()
+        # driver = open_browser(self.rect)
         open_symbol_search(driver)
         last_checked_element = 0
 
@@ -157,8 +215,10 @@ class Browser(Process):
                     break
 
             source_code = get_source_code(driver)
+            symbols = get_symbols_recursive(driver)
+            # symbols = []
 
-            list_to_json_file(f"symbols/{source_code}#{source_description.split(' — ')[-1]}.json",[])
+            list_to_json_file(f"symbols/{source_code}#{source_description.split(' — ')[-1]}.json",symbols)
             self.queue.task_done()
         # # x = driver.page_source
         # # driver.save_screenshot(f"screenshots/after_open_menu.png")
@@ -192,7 +252,14 @@ def get_sources(driver:webdriver) -> list:
     return find_all_by_class(driver, "description-jKCUPVoO")
 
 def goto_sources(driver:webdriver) -> None:
+    clear_input(driver)
     find_by_class(driver, "exchange-KMA9DMBY").click()
+
+def text_from_element(element:webdriver):
+    return element.text
+
+def placeholder(*args) -> None:
+    return args
 
 if __name__ == "__main__":
     freeze_support()
@@ -210,10 +277,17 @@ if __name__ == "__main__":
     x3 = 2 * w
     open_symbol_search(driver)
     goto_sources(driver)
+
+    # with ProcessPoolExecutor() as executor:
+    #     for description in executor.map(None, sources):
+    #         queue.put(description)
+
     sources_descriptions = [el.text for el in get_sources(driver)]
-    driver.quit()
     queue = JoinableQueue()
     # queue = Queue()
+    # with ProcessPoolExecutor() as executor:
+    #     for description in executor.map(placeholder, sources_descriptions):
+    #         queue.put(description)
     for sd in sources_descriptions:
         queue.put(sd)
 
@@ -226,13 +300,20 @@ if __name__ == "__main__":
         {'w':w, 'h':h, 'x':x3, 'y':y2}
     ]
     threads = []
-    division = 6
+    division = cpu_count()
+    division = 1
 
-    for n,rect in zip(range(division),browser_rects):
-        t = Browser(queue=queue, rect=rect)
+    # for n,rect in zip(range(division),browser_rects):
+    #     t = Browser(queue=queue, rect=rect)
+    #     threads.append(t)
+    #     t.start()
+
+    for n in range(division):
+        t = Browser(queue=queue)
         threads.append(t)
         t.start()
 
+    driver.quit()
     queue.join()
 
     symbols = []
